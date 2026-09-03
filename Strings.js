@@ -11,7 +11,7 @@ var TABLE = {
     nowW: "now", remaining: "Time left", curAvg: "session avg", histAvg: "all-time avg",
     tipAwake: "in use", tipRemainCur: "left (session avg)", tipRemainHist: "left (all-time avg)",
     onAc: "Plugged in", rightClick: "Right-click to change", histUse: "awake", histSlept: "suspended",
-    err: "Sampler", errNoBattery: "no battery found", errClock: "system clock not synced yet"
+    err: "Sampler", errNoBattery: "no battery found", errClock: "system clock not synced yet", errDataDir: "data directory failed ownership check"
   },
   "zh-Hant": {
     current: "電池續航力", last: "上次放電（目前接電中）",
@@ -21,7 +21,7 @@ var TABLE = {
     nowW: "現在", remaining: "還能用多久", curAvg: "本次平均", histAvg: "歷史平均",
     tipAwake: "實際使用", tipRemainCur: "還能用多久（本次平均）", tipRemainHist: "還能用多久（歷史平均）",
     onAc: "接電中", rightClick: "右鍵切換顯示", histUse: "實際", histSlept: "睡",
-    err: "取樣器", errNoBattery: "沒有電池", errClock: "系統時鐘還沒同步"
+    err: "取樣器", errNoBattery: "沒有電池", errClock: "系統時鐘還沒同步", errDataDir: "資料目錄擁有者檢查失敗"
   },
   "zh-Hans": {
     current: "电池续航力", last: "上次放电（目前接电中）",
@@ -31,7 +31,7 @@ var TABLE = {
     nowW: "现在", remaining: "还能用多久", curAvg: "本次平均", histAvg: "历史平均",
     tipAwake: "实际使用", tipRemainCur: "还能用多久（本次平均）", tipRemainHist: "还能用多久（历史平均）",
     onAc: "接电中", rightClick: "右键切换显示", histUse: "实际", histSlept: "睡",
-    err: "采样器", errNoBattery: "没有电池", errClock: "系统时钟尚未同步"
+    err: "采样器", errNoBattery: "没有电池", errClock: "系统时钟尚未同步", errDataDir: "数据目录所有者检查失败"
   }
 }
 

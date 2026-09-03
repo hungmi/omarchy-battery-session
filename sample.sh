@@ -1,60 +1,119 @@
-#!/bin/bash
+#!/usr/bin/bash
 # One sample: print one TSV line to stdout and append it to this month's file.
-# Called by Service.qml every 60 seconds.
+# Called by Service.qml every 60 seconds as
+#   /usr/bin/bash --noprofile --norc sample.sh
+# with a cleared environment (PATH=/usr/bin, LC_ALL=C only).
 #
 #   wall  jiffies  boot  pct  state  ac  energy_wh  power_w
 #
 # jiffies is the global tick count from the second line of /proc/schedstat. It
 # only advances while the machine is awake and freezes during suspend. Stored
 # raw; the reader derives HZ from adjacent samples.
-# Exit codes read by Service.qml: 3 no battery, 4 clock not synced yet.
+#
+# Trust boundary: everything is bash builtins reading /sys and /proc. The only
+# external programs are /usr/bin/mkdir (first run) and /usr/bin/rm (monthly
+# retention), both by absolute path. The data directory is derived from the
+# password database (~ with HOME unset), never from environment strings, and
+# every directory and file is verified to be owned by us, not a symlink, and a
+# regular file before it is created, appended to, or deleted.
+#
+# Exit codes read by Service.qml: 3 no battery, 4 clock not synced yet,
+# 5 data directory or file failed verification.
 set -u
+umask 077
+export PATH=/usr/bin LC_ALL=C
+unset -v HOME CDPATH IFS
+shopt -s nullglob
 
 ps=/sys/class/power_supply
-dir="${XDG_DATA_HOME:-$HOME/.local/share}/battery-session"
 keep_months=12
 
+# ---- locate the system battery (skip mouse/keyboard batteries) ----
 bat=""
 for d in "$ps"/*; do
-  [[ -r $d/type && $(<"$d/type") == Battery ]] || continue
-  [[ -r $d/scope && $(<"$d/scope") != System ]] && continue   # skip mouse/keyboard batteries
+  [[ -r $d/type ]] && read -r t < "$d/type" || continue
+  [[ $t == Battery ]] || continue
+  if [[ -r $d/scope ]]; then read -r s < "$d/scope"; [[ $s == System ]] || continue; fi
   bat=$d; break
 done
 [[ -n $bat ]] || exit 3
 
-wall=$(printf '%(%s)T' -1)
+printf -v wall '%(%s)T' -1
 (( wall > 1500000000 )) || exit 4   # Asahi boots at 1970 until timesyncd catches up
 
-jiffies=$(awk 'NR==2 {print $2}' /proc/schedstat)
-boot=$(cut -c1-8 /proc/sys/kernel/random/boot_id)
-pct=$(<"$bat/capacity")
-state=$(<"$bat/status")
+# ---- awake-only tick counter ----
+{ read -r _; read -r _ jiffies _; } < /proc/schedstat
+[[ $jiffies =~ ^[0-9]{1,20}$ ]] || exit 4
+
+read -r bootid < /proc/sys/kernel/random/boot_id
+boot=${bootid:0:8}
+
+# Reads a sysfs integer into the named variable; empty if missing or malformed.
+rdint() {
+  local -n out=$1; out=""
+  local v
+  [[ -r $2 ]] && read -r v < "$2" || return 0
+  [[ $v =~ ^-?[0-9]{1,18}$ ]] && out=$v
+}
+# Fixed-point: value / 10^scale with two decimals, sign kept, integers only.
+fix2() {  # fix2 <int> <scale>
+  local v=$1 s="" div=1 i
+  (( v < 0 )) && { s=-; v=$(( -v )); }
+  for (( i = 0; i < $2; i++ )); do div=$(( div * 10 )); done
+  printf '%s%d.%02d' "$s" $(( v / div )) $(( v % div / (div / 100) ))
+}
+
+rdint pct "$bat/capacity"
+read -r state < "$bat/status" 2>/dev/null || state=""
+state_re='^[A-Za-z ]{1,20}$'
+[[ $state =~ $state_re ]] || state=Unknown
 
 # Mains power. Ignore per-port USB-C source supplies such as tps6598x.
 ac=""
 for d in "$ps"/*; do
-  [[ -r $d/type && $(<"$d/type") == Mains && -r $d/online ]] || continue
-  [[ $(basename "$d") == tps* ]] && continue
-  ac=$(<"$d/online"); break
+  [[ ${d##*/} == tps* ]] && continue
+  [[ -r $d/type && -r $d/online ]] && read -r t < "$d/type" || continue
+  [[ $t == Mains ]] || continue
+  rdint ac "$d/online"; break
 done
 
-# µWh/µW → Wh/W, sign preserved. Devices exposing only charge_now use Ah×V.
-uw()  { awk -v v="$(<"$1")" 'BEGIN { printf "%.2f", v / 1e6 }'; }
-ahv() { awk -v a="$(<"$1")" -v v="$(<"$2")" 'BEGIN { printf "%.2f", a * v / 1e12 }'; }
+# µWh/µW → Wh/W. Devices exposing only charge_now use µAh × µV = 1e-12 Wh.
 wh=""; pw=""
-if   [[ -r $bat/energy_now ]]; then wh=$(uw "$bat/energy_now")
-elif [[ -r $bat/charge_now && -r $bat/voltage_now ]]; then wh=$(ahv "$bat/charge_now" "$bat/voltage_now"); fi
-if   [[ -r $bat/power_now ]]; then pw=$(uw "$bat/power_now")
-elif [[ -r $bat/current_now && -r $bat/voltage_now ]]; then pw=$(ahv "$bat/current_now" "$bat/voltage_now"); fi
+rdint e "$bat/energy_now";  rdint p "$bat/power_now"
+rdint q "$bat/charge_now";  rdint i "$bat/current_now"; rdint v "$bat/voltage_now"
+if   [[ -n $e ]];            then wh=$(fix2 "$e" 6)
+elif [[ -n $q && -n $v ]];   then wh=$(fix2 $(( q * v )) 12); fi
+if   [[ -n $p ]];            then pw=$(fix2 "$p" 6)
+elif [[ -n $i && -n $v ]];   then pw=$(fix2 $(( i * v )) 12); fi
 
-line=$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$wall" "$jiffies" "$boot" "$pct" "$state" "$ac" "$wh" "$pw")
+printf -v line '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$wall" "$jiffies" "$boot" "$pct" "$state" "$ac" "$wh" "$pw"
 
-mkdir -p "$dir"
-f="$dir/$(printf '%(%Y-%m)T' -1).tsv"
-[[ -s $f ]] || printf 'wall\tjiffies\tboot\tpct\tstate\tac\tenergy_wh\tpower_w\n' > "$f"
-printf '%s\n' "$line" >> "$f"
+# ---- data directory: ~/.local/share/battery-session, verified at every level ----
+# HOME is unset above, so ~ comes from the password database.
+home=~
+[[ $home == /* && -d $home && ! -L $home && -O $home ]] || exit 5
+owned_dir() { [[ -d $1 && ! -L $1 && -O $1 ]]; }
+owned_dir "$home/.local" || exit 5
+owned_dir "$home/.local/share" || exit 5
+dir=$home/.local/share/battery-session
+if [[ ! -e $dir ]]; then /usr/bin/mkdir -m 700 -- "$dir" || exit 5; fi
+owned_dir "$dir" || exit 5
 
-# Keep only the last N months so the data does not grow forever
-ls -1 "$dir"/*.tsv 2>/dev/null | sort | head -n -"$keep_months" | xargs -r rm -f
+printf -v month '%(%Y-%m)T' -1
+f=$dir/$month.tsv
+if [[ -e $f ]]; then
+  [[ -f $f && ! -L $f && -O $f ]] || exit 5
+else
+  printf 'wall\tjiffies\tboot\tpct\tstate\tac\tenergy_wh\tpower_w\n' > "$f" || exit 5
+fi
+printf '%s\n' "$line" >> "$f" || exit 5
+
+# ---- keep only the last N month files (glob is sorted, LC_ALL=C) ----
+files=("$dir"/[0-9][0-9][0-9][0-9]-[0-9][0-9].tsv)
+if (( ${#files[@]} > keep_months )); then
+  for old in "${files[@]:0:${#files[@]}-keep_months}"; do
+    [[ -f $old && ! -L $old && -O $old ]] && /usr/bin/rm -f -- "$old"
+  done
+fi
 
 printf '%s\n' "$line"

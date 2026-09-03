@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "hungmi.battery-session",
   "name": "Battery Session",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "hungmi",
   "license": "MIT",
   "description": "How long this discharge has actually been in use — awake time only, suspend excluded, lock screen included.",

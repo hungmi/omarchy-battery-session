@@ -51,12 +51,40 @@ is just the difference. Nothing needs to observe suspend or resume events, and
 a missed sample, a shell restart, or a reboot self-corrects on the next sample.
 
 Samples go to `~/.local/share/battery-session/YYYY-MM.tsv`, one file per month,
-last 12 months kept. Roughly 2 MB per year.
+last 12 months kept. Roughly 2.5 MB per month, so about 30 MB on disk at most.
 
 Sampling runs inside the Omarchy shell. When the shell is not running (before
 login, or after `omarchy restart shell`) no samples are taken. Awake time is
 unaffected; a charge that happened entirely during such a gap is detected from
 the jump in stored energy.
+
+## Security notes
+
+The plugin runs as your user inside the Omarchy shell, like every shell plugin.
+What it does with that:
+
+- **One child process.** Every 60 seconds the service starts `/usr/bin/bash`
+  by absolute path with `--noprofile --norc`, a cleared environment
+  (`PATH=/usr/bin`, `LC_ALL=C`), stdin and stderr closed, and a hard deadline
+  (SIGTERM after 20 s, SIGKILL 5 s later). It is stopped when the service is
+  destroyed.
+- **The script is bash builtins.** `sample.sh` reads `/sys/class/power_supply`
+  and `/proc/schedstat` with `read`; there is no awk, cut, ls, sort or xargs.
+  The only external programs are `/usr/bin/mkdir` (first run) and
+  `/usr/bin/rm` (monthly retention), both by absolute path.
+- **The data directory is not taken from the environment.** It is always
+  `~/.local/share/battery-session`, with `~` resolved from the password
+  database. Before anything is created, appended to or deleted, the script
+  checks that `~`, `~/.local`, `~/.local/share`, the data directory and the
+  month file are owned by the current user, are not symlinks, and are a
+  directory or regular file as appropriate. Any failure aborts the sample
+  (exit 5, shown in the popup). The directory is created with mode 0700.
+- **Bounded reads.** History is loaded with Quickshell's `FileView`, not a
+  shell pipeline. Files over 16 MB are skipped, at most 150 000 rows are kept
+  in memory, and a sampler line over 256 characters is discarded.
+- **No network, no sudo, no systemd units, no writes outside the data
+  directory, no configuration changes** other than the `barLabel` value the
+  widget writes to `shell.json` when you right-click it.
 
 ## Install
 
@@ -91,7 +119,7 @@ rm -rf ~/.local/share/battery-session
 - Omarchy 4.x shell (Quickshell based)
 - A laptop battery exposed under `/sys/class/power_supply/` with either
   `energy_now` or `charge_now` + `voltage_now`
-- bash and awk (part of any Arch base install). No Python, no extra packages.
+- `/usr/bin/bash` 4.3 or newer (part of any Arch base install). No Python, no awk, no extra packages.
 
 ## Development
 
