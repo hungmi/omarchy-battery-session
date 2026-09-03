@@ -66,7 +66,7 @@ omarchy plugin add https://github.com/hungmi/omarchy-battery-session
 The widget appears on the right side of the bar next to the power indicator.
 It needs two samples (about a minute) before showing numbers.
 
-Settings, via `omarchy bar set hungmingtsai.battery-session <key> <value>`:
+Settings, via `omarchy bar set hungmi.battery-session <key> <value>`:
 
 | Key | Values | Default |
 |---|---|---|
@@ -76,7 +76,7 @@ Settings, via `omarchy bar set hungmingtsai.battery-session <key> <value>`:
 ## Remove
 
 ```bash
-omarchy plugin remove hungmingtsai.battery-session
+omarchy plugin remove hungmi.battery-session
 ```
 
 Removal does not delete the recorded data. To remove that too:

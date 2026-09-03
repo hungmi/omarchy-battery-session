@@ -8,7 +8,7 @@ import "Strings.js" as S
 // 只負責顯示。每個螢幕一份，全部讀同一個 Service。
 BarWidget {
   id: root
-  moduleName: "hungmingtsai.battery-session"
+  moduleName: "hungmi.battery-session"
 
   // 讀 _services 讓 binding 在 service 晚點才載入時會重算
   readonly property var service: bar && bar.shell && typeof bar.shell.serviceFor === "function"
@@ -17,7 +17,7 @@ BarWidget {
   readonly property var cur: summary ? summary.current : null
   readonly property bool live: cur ? cur.live : false
 
-  // bar 上顯示哪個值，shell.json 可設：omarchy bar set hungmingtsai.battery-session barLabel <值>
+  // bar 上顯示哪個值，shell.json 可設：omarchy bar set hungmi.battery-session barLabel <值>
   //   remainHist  還能用多久，歷史平均（含本次）——預設，剛拔電時比本次平均穩
   //   remainCur   還能用多久，本次平均
   //   awake       拔電後實際使用了多久
