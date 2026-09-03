@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "id": "hungmingtsai.battery-session",
+  "name": "Battery Session",
+  "version": "0.1.0",
+  "author": "hungmingtsai",
+  "license": "MIT",
+  "description": "How long this discharge has actually been in use — awake time only, suspend excluded, lock screen included.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Battery Session",
+    "description": "Awake time since unplugging, with per-session history.",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "barLabel": "remainHist",
+      "lang": "auto"
+    },
+    "schema": [
+      {
+        "key": "barLabel",
+        "type": "enum",
+        "label": "Bar shows",
+        "options": [
+          "remainHist",
+          "remainCur",
+          "awake"
+        ],
+        "defaultValue": "remainHist"
+      },
+      {
+        "key": "lang",
+        "type": "enum",
+        "label": "Language",
+        "options": [
+          "auto",
+          "en",
+          "zh"
+        ],
+        "defaultValue": "auto"
+      }
+    ]
+  }
+}
