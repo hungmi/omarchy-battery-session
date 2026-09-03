@@ -92,12 +92,17 @@ printf -v line '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$wall" "$jiffies" "$boot" "$pct
 # HOME is unset above, so ~ comes from the password database.
 home=~
 [[ $home == /* && -d $home && ! -L $home && -O $home ]] || exit 5
+# Each level is created if missing (never through a symlink), then verified.
+# Shared XDG parents get the default mode; our own directory is 0700.
 owned_dir() { [[ -d $1 && ! -L $1 && -O $1 ]]; }
-owned_dir "$home/.local" || exit 5
-owned_dir "$home/.local/share" || exit 5
+ensure_dir() {  # ensure_dir <path> [mode]
+  if [[ ! -e $1 && ! -L $1 ]]; then /usr/bin/mkdir ${2:+-m "$2"} -- "$1" || return 1; fi
+  owned_dir "$1"
+}
+ensure_dir "$home/.local" || exit 5
+ensure_dir "$home/.local/share" || exit 5
 dir=$home/.local/share/battery-session
-if [[ ! -e $dir ]]; then /usr/bin/mkdir -m 700 -- "$dir" || exit 5; fi
-owned_dir "$dir" || exit 5
+ensure_dir "$dir" 700 || exit 5
 
 printf -v month '%(%Y-%m)T' -1
 f=$dir/$month.tsv

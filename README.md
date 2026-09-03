@@ -75,9 +75,10 @@ What it does with that:
 - **The data directory is not taken from the environment.** It is always
   `~/.local/share/battery-session`, with `~` resolved from the password
   database. Before anything is created, appended to or deleted, the script
-  checks that `~`, `~/.local`, `~/.local/share`, the data directory and the
-  month file are owned by the current user, are not symlinks, and are a
-  directory or regular file as appropriate. Any failure aborts the sample
+  creates any missing directory level (never through a symlink) and checks that
+  `~`, `~/.local`, `~/.local/share`, the data directory and the month file are
+  owned by the current user, are not symlinks, and are a directory or regular
+  file as appropriate. Any failure aborts the sample
   (exit 5, shown in the popup). The directory is created with mode 0700.
 - **Bounded reads.** History is loaded with Quickshell's `FileView`, not a
   shell pipeline. Files over 16 MB are skipped, at most 150 000 rows are kept
