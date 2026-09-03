@@ -2,7 +2,7 @@
 # One sample: print one TSV line to stdout and append it to this month's file.
 # Called by Service.qml every 60 seconds as
 #   /usr/bin/bash --noprofile --norc sample.sh
-# with a cleared environment (PATH=/usr/bin, LC_ALL=C only).
+# with a cleared environment (PATH=/usr/bin, LC_ALL=C and TZ only).
 #
 #   wall  jiffies  boot  pct  state  ac  energy_wh  power_w
 #

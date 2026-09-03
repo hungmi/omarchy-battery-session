@@ -111,7 +111,9 @@ Item {
     running: false
     command: ["/usr/bin/bash", "--noprofile", "--norc", root.samplerPath]
     clearEnvironment: true
-    environment: ({ PATH: "/usr/bin", LC_ALL: "C" })
+    // TZ is passed through (null = system value) so the month file the sampler
+    // writes matches the month file names this service computes with Date.
+    environment: ({ PATH: "/usr/bin", LC_ALL: "C", TZ: null })
     stdinEnabled: false
     stderr: null
     stdout: StdioCollector {
@@ -127,7 +129,7 @@ Item {
     }
     onExited: function(code, status) {
       deadline.stop(); killer.stop()
-      root.lastError = status !== 0 ? "sample.sh killed"
+      root.lastError = status !== 0 ? "errKilled"
         : code === 0 ? ""
         : code === 3 ? "errNoBattery"     // translated by the widget
         : code === 4 ? "errClock"

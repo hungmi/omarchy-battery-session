@@ -65,7 +65,7 @@ What it does with that:
 
 - **One child process.** Every 60 seconds the service starts `/usr/bin/bash`
   by absolute path with `--noprofile --norc`, a cleared environment
-  (`PATH=/usr/bin`, `LC_ALL=C`), stdin and stderr closed, and a hard deadline
+  (`PATH=/usr/bin`, `LC_ALL=C`, and the system `TZ` so month file names agree), stdin and stderr closed, and a hard deadline
   (SIGTERM after 20 s, SIGKILL 5 s later). It is stopped when the service is
   destroyed.
 - **The script is bash builtins.** `sample.sh` reads `/sys/class/power_supply`
