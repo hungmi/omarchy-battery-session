@@ -5,26 +5,28 @@ import qs.Commons
 import "Model.js" as Model
 import "Strings.js" as S
 
-// 只負責顯示。每個螢幕一份，全部讀同一個 Service。
+// Display only. One per screen, all reading the same Service.
 BarWidget {
   id: root
   moduleName: "hungmi.battery-session"
 
-  // 讀 _services 讓 binding 在 service 晚點才載入時會重算
+  // Reading _services makes the binding re-evaluate when the service loads later
   readonly property var service: bar && bar.shell && typeof bar.shell.serviceFor === "function"
     ? (bar.shell._services, bar.shell.serviceFor(moduleName)) : null
   readonly property var summary: service ? service.summary : null
   readonly property var cur: summary ? summary.current : null
   readonly property bool live: cur ? cur.live : false
 
-  // bar 上顯示哪個值，shell.json 可設：omarchy bar set hungmi.battery-session barLabel <值>
-  //   remainHist  還能用多久，歷史平均（含本次）——預設，剛拔電時比本次平均穩
-  //   remainCur   還能用多久，本次平均
-  //   awake       拔電後實際使用了多久
+  // Which value the bar shows; set via: omarchy bar set hungmi.battery-session barLabel <value>
+  //   remainHist  time left, all-time average (current session included). Default:
+  //               steadier than the session average right after unplugging
+  //   remainCur   time left, this session's average
+  //   awake       time in use since unplugging
   readonly property string lang: S.resolve(setting("lang", "auto"), Qt.locale().name)
+  readonly property bool zh: S.isZh(lang)
   function t(key) { return S.t(lang, key) }
-  // 瓦數格式：中文 "6.8 W"，英文照 Omarchy 慣例 "6.8W"
-  function fmtW(x) { return x.toFixed(1) + (lang === "zh" ? " W" : "W") }
+  // Watts: Chinese "6.8 W", English "6.8W" as in the built-in Omarchy panels
+  function fmtW(x) { return x.toFixed(1) + (zh ? " W" : "W") }
 
   readonly property string mode: setting("barLabel", "remainHist")
   readonly property var labelSecs: !live ? null
@@ -34,7 +36,8 @@ BarWidget {
   readonly property string label: labelSecs ? Model.hm(labelSecs) : ""
   readonly property string labelDesc: mode === "awake" ? t("tipAwake") : mode === "remainCur" ? t("tipRemainCur") : t("tipRemainHist")
 
-  // 右鍵輪替模式。寫進 shell.json，等於永久記住；shell.json 熱重載，setting 會自己更新。
+  // Right-click cycles the mode. Written to shell.json so it persists; shell.json
+  // hot-reloads, so setting() updates by itself.
   readonly property var modes: ["remainHist", "remainCur", "awake"]
   function cycleMode() {
     var next = modes[(Math.max(0, modes.indexOf(mode)) + 1) % modes.length]
@@ -42,13 +45,14 @@ BarWidget {
   }
 
   property bool popupOpen: false
-  // shell.summon/hide/toggle 走這三個
+  // Used by shell.summon / hide / toggle
   readonly property bool opened: popupOpen
   function open() { popupOpen = true }
   function close() { popupOpen = false }
 
-  // icon 和文字分開兩個 Text（同 omarchy.media 的做法）。單一 Text 混 Nerd glyph
-  // 和文字時 implicitWidth 會少算約一個字，跟右邊的 widget 重疊。
+  // Icon and text are separate Text items (as omarchy.media does). A single Text
+  // mixing a Nerd glyph and text under-reports implicitWidth by about one
+  // character and overlaps the widget to the right.
   implicitWidth: row.implicitWidth + Style.space(14)
   implicitHeight: barSize
 
@@ -86,7 +90,7 @@ BarWidget {
       if (mouse.button === Qt.RightButton) root.cycleMode()
       else root.popupOpen = !root.popupOpen
     }
-    onEntered: if (root.bar) root.bar.showTooltip(root, (root.live ? (root.lang === "zh" ? root.labelDesc + " " + root.label : root.label + " " + root.labelDesc) : root.t("onAc")) + "\n" + root.t("rightClick"))
+    onEntered: if (root.bar) root.bar.showTooltip(root, (root.live ? (root.zh ? root.labelDesc + " " + root.label : root.label + " " + root.labelDesc) : root.t("onAc")) + "\n" + root.t("rightClick"))
     onExited: if (root.bar) root.bar.hideTooltip(root)
   }
 
@@ -96,7 +100,7 @@ BarWidget {
     bar: root.bar
     owner: root
     open: root.popupOpen
-    contentWidth: popup.fittedContentWidth(Style.space(root.lang === "zh" ? 360 : 400))
+    contentWidth: popup.fittedContentWidth(Style.space(root.zh ? 360 : 400))
     contentHeight: popup.fittedContentHeight(column.implicitHeight)
 
     component Line: Row {
@@ -105,7 +109,7 @@ BarWidget {
       width: parent.width
       Text {
         text: k
-        width: root.lang === "zh" ? Style.space(120) : Style.space(180)
+        width: root.zh ? Style.space(120) : Style.space(180)
         color: Qt.darker(root.bar.foreground, 1.4)
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.body
@@ -160,7 +164,7 @@ BarWidget {
 
       Text {
         visible: root.service && root.service.lastError !== ""
-        text: "⚠ " + root.t("err") + ": " + (root.service ? root.service.lastError : "")
+        text: "⚠ " + root.t("err") + ": " + (root.service ? root.t(root.service.lastError) : "")
         color: root.bar.foreground
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.caption

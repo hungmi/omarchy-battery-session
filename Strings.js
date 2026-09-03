@@ -1,6 +1,7 @@
 .pragma library
 
-// 中英文字串。lang 設定 auto 時看系統 locale：zh* 中文，其他英文。
+// UI strings. `lang` setting: "auto" follows the system locale, or force
+// "en" / "zh-Hant" (Traditional Chinese) / "zh-Hans" (Simplified Chinese).
 var TABLE = {
   en: {
     current: "Battery life", last: "Last discharge",
@@ -10,9 +11,9 @@ var TABLE = {
     nowW: "now", remaining: "Time left", curAvg: "session avg", histAvg: "all-time avg",
     tipAwake: "in use", tipRemainCur: "left (session avg)", tipRemainHist: "left (all-time avg)",
     onAc: "Plugged in", rightClick: "Right-click to change", histUse: "awake", histSlept: "suspended",
-    err: "Sampler"
+    err: "Sampler", errNoBattery: "no battery found", errClock: "system clock not synced yet"
   },
-  zh: {
+  "zh-Hant": {
     current: "電池續航力", last: "上次放電（目前接電中）",
     empty: "還沒有放電紀錄", calibrating: "還在收集中（校準 HZ 需要兩筆取樣）",
     unplugged: "停止充電於", now: "現在",
@@ -20,14 +21,34 @@ var TABLE = {
     nowW: "現在", remaining: "還能用多久", curAvg: "本次平均", histAvg: "歷史平均",
     tipAwake: "實際使用", tipRemainCur: "還能用多久（本次平均）", tipRemainHist: "還能用多久（歷史平均）",
     onAc: "接電中", rightClick: "右鍵切換顯示", histUse: "實際", histSlept: "睡",
-    err: "取樣器"
+    err: "取樣器", errNoBattery: "沒有電池", errClock: "系統時鐘還沒同步"
+  },
+  "zh-Hans": {
+    current: "电池续航力", last: "上次放电（目前接电中）",
+    empty: "还没有放电记录", calibrating: "还在收集中（校准 HZ 需要两次采样）",
+    unplugged: "停止充电于", now: "现在",
+    elapsed: "拔电多久", slept: "睡/关", sleptWh: "睡/关耗掉", awake: "实际使用", power: "耗电速度",
+    nowW: "现在", remaining: "还能用多久", curAvg: "本次平均", histAvg: "历史平均",
+    tipAwake: "实际使用", tipRemainCur: "还能用多久（本次平均）", tipRemainHist: "还能用多久（历史平均）",
+    onAc: "接电中", rightClick: "右键切换显示", histUse: "实际", histSlept: "睡",
+    err: "采样器", errNoBattery: "没有电池", errClock: "系统时钟尚未同步"
   }
 }
 
-function resolve(setting, localeName) {
-  if (setting === "zh" || setting === "en") return setting
-  return String(localeName || "").indexOf("zh") === 0 ? "zh" : "en"
+// Traditional: Taiwan, Hong Kong, Macau, or an explicit Hant script tag.
+// Everything else under zh (CN, SG, bare "zh") is Simplified, as in CLDR.
+function zhVariant(localeName) {
+  var n = String(localeName || "").replace(/-/g, "_")
+  return /^zh_(TW|HK|MO)|Hant/.test(n) ? "zh-Hant" : "zh-Hans"
 }
+
+function resolve(setting, localeName) {
+  if (TABLE[setting]) return setting
+  if (setting === "zh") return "zh-Hant"   // value used before the two variants existed
+  return String(localeName || "").indexOf("zh") === 0 ? zhVariant(localeName) : "en"
+}
+
+function isZh(lang) { return lang.indexOf("zh") === 0 }
 
 function t(lang, key) {
   var tbl = TABLE[lang] || TABLE.en

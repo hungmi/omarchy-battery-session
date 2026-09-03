@@ -3,8 +3,9 @@ import Quickshell
 import Quickshell.Io
 import "Model.js" as Model
 
-// 取樣器。shell 只建一份（不像 bar widget 每個螢幕一份），每 60 秒跑一次
-// sample.sh，把回來的那一行接到記憶體裡的列表，重算摘要給 widget 讀。
+// Sampler. The shell creates exactly one of these (unlike bar widgets, which
+// exist once per screen). Every 60 seconds it runs sample.sh, appends the
+// returned line to the in-memory list and recomputes the summary for widgets.
 Item {
   id: root
 
@@ -14,7 +15,7 @@ Item {
   readonly property string dataDir: (Quickshell.env("XDG_DATA_HOME") || home + "/.local/share") + "/battery-session"
   readonly property string samplerPath: String(Qt.resolvedUrl("sample.sh")).replace(/^file:\/\//, "")
   readonly property int intervalSec: 60
-  // 只載入最近幾個月進記憶體；更早的留在磁碟給人看
+  // Only the last few months are loaded into memory; older files stay on disk
   readonly property int loadMonths: 3
 
   property var rows: []
@@ -31,7 +32,7 @@ Item {
     sampleProc.running = true
   }
 
-  // 啟動：把磁碟上的歷史讀回來，然後立刻取第一筆。
+  // Startup: read history back from disk, then take the first sample right away.
   Process {
     id: loadProc
     running: true
@@ -67,8 +68,8 @@ Item {
     }
     onExited: function(code) {
       root.lastError = code === 0 ? ""
-        : code === 3 ? "沒有電池"
-        : code === 4 ? "系統時鐘還沒同步"
+        : code === 3 ? "errNoBattery"     // translated by the widget
+        : code === 4 ? "errClock"
         : "sample.sh exit " + code
     }
   }

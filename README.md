@@ -39,7 +39,8 @@ Averages use awake power only. Suspend still draws roughly 1 W on many laptops;
 that energy is reported separately as "Used while asleep" so it does not
 inflate your estimate.
 
-Languages: English and Traditional Chinese, following the system locale.
+Languages: English, Traditional Chinese and Simplified Chinese, following the
+system locale (`zh_TW` / `zh_HK` / `zh_MO` → Traditional, other `zh` → Simplified).
 
 ## How it works
 
@@ -71,7 +72,7 @@ Settings, via `omarchy bar set hungmi.battery-session <key> <value>`:
 | Key | Values | Default |
 |---|---|---|
 | `barLabel` | `remainHist` `remainCur` `awake` | `remainHist` |
-| `lang` | `auto` `en` `zh` | `auto` |
+| `lang` | `auto` `en` `zh-Hant` `zh-Hans` | `auto` |
 
 ## Remove
 

@@ -1,13 +1,16 @@
 .pragma library
 
-// 讀取端演算法。從 sample.sh 寫的 TSV 算出每段放電的拔電時間、醒著時間、耗電。
-// 醒著時間 = 相鄰兩筆 jiffies 差 / HZ 的累加。jiffies 只在醒著時前進，suspend
-// 時凍結，開機歸零（用 boot 偵測），所以不需要每筆都取樣到——下一筆自動補回差額。
+// Reader side. Turns the TSV written by sample.sh into per-discharge figures:
+// time since unplugging, awake time, energy used.
+// Awake time = sum of (jiffies delta / HZ) over adjacent samples. jiffies only
+// advances while the machine is awake, freezes during suspend and resets on boot
+// (detected via the boot column), so missed samples do not matter: the next one
+// carries the full difference.
 
-var SANE_WALL = 1500000000      // 2017。開機時還沒 NTP 同步的列是垃圾
-var WH_JITTER = 1.0             // 放電中電量上升超過這個值 = 中途充過電。電量計本身會飄 ±0.6
-var SLEEP_GAP = 120             // 相鄰兩筆 wall 差比 jiffies 差多超過這麼多秒 = 中間睡過
-var MIN_HIST_AWAKE = 600        // 歷史平均只算醒著 ≥10 分鐘的 session
+var SANE_WALL = 1500000000      // 2017. Rows written before NTP sync at boot are garbage
+var WH_JITTER = 1.0             // Energy rising by more than this while discharging = charged in between. The gauge itself drifts ±0.6
+var SLEEP_GAP = 120             // Wall delta exceeding jiffies delta by more than this many seconds = slept in between
+var MIN_HIST_AWAKE = 600        // All-time average only counts sessions awake for ≥10 minutes
 var HZ_CANDIDATES = [100, 250, 300, 1000]
 
 function parseRow(line) {
@@ -23,7 +26,8 @@ function parseRow(line) {
   }
 }
 
-// 檔案本來就照時間 append，不排序——wall 跳動時排序反而會打亂順序。
+// The file is appended in time order already; do not sort. Sorting by wall would
+// scramble rows around a wall-clock jump.
 function parseRows(text) {
   var out = [], seen = {}
   var lines = String(text || "").split("\n")
@@ -42,8 +46,10 @@ function appendRow(rows, r) {
   return rows.concat([r])
 }
 
-// HZ = jiffies差 / 秒差，取相鄰一分鐘內的配對的中位數，湊到常見值。
-// 有 suspend 的配對 wall 差會很大，被 dw <= 130 排掉；漏網的靠中位數吃掉。
+// HZ = jiffies delta / seconds delta, median over adjacent pairs about a minute
+// apart, snapped to a common kernel value. Pairs spanning a suspend have a huge
+// wall delta and are dropped by dw <= 130; anything that slips through is
+// absorbed by the median.
 function detectHz(rows) {
   var rates = []
   for (var i = 1; i < rows.length; i++) {
@@ -66,11 +72,15 @@ function onBattery(r) {
   return (r.ac === "0" || r.ac === "1") ? r.ac === "0" : r.state === "Discharging"
 }
 
-// 切成一段段放電：ac 翻回 1 就結束；取樣有斷（間隔 > SLEEP_GAP）且電量升了也切——
-// 那是空白期間插過電又拔掉。連續取樣時一律信 ac：高負載會把電量計讀數暫時壓低，
-// 負載掉了讀數彈回 +1 Wh 以上，不能當成充過電（2026-09-03 實際誤切過一次）。
-// ac 翻回 1 的那筆若電量比最後放電筆低，就併進來當終點：睡覺/沒電關機期間沒取樣，
-// 醒來第一筆已經插電，不併的話整晚掉的電和時間都會消失。
+// Split rows into discharge sessions. A session ends when ac flips back to 1.
+// It also ends when there is a sampling gap (> SLEEP_GAP) AND stored energy went
+// up: the charger was plugged and unplugged while nobody was looking. With
+// continuous sampling ac is trusted as-is: a heavy load depresses the gauge
+// reading temporarily and it bounces back by 1+ Wh when the load drops, which
+// must not be mistaken for charging (this misfired once on real data, 2026-09-03).
+// If the row where ac flips to 1 has less energy than the last discharging row,
+// it is absorbed as the session end point: no samples are taken while asleep or
+// after running flat, and without this the energy and time lost overnight vanish.
 function sessions(rows) {
   var out = [], cur = []
   for (var i = 0; i < rows.length; i++) {
@@ -100,16 +110,18 @@ function awakeSecs(seg, hz) {
   var total = 0
   for (var i = 1; i < seg.length; i++) {
     var a = seg[i - 1], b = seg[i]
-    if (a.boot !== b.boot) continue            // 跨重開機：時鐘歸零，且那段機器是關的
+    if (a.boot !== b.boot) continue            // Across a reboot: counter reset, and the machine was off
     var d = (b.jiffies - a.jiffies) / hz
     var dw = b.wall - a.wall
-    if (d > 0) total += dw > 0 ? Math.min(d, dw) : d   // 正常 d ≤ dw，用 dw 夾住；wall 倒退只信 jiffies
+    if (d > 0) total += dw > 0 ? Math.min(d, dw) : d   // Normally d ≤ dw, clamp to dw; if wall went backwards trust jiffies alone
   }
   return total
 }
 
-// 醒著時耗的電：只累加「中間沒睡」的相鄰配對的 Wh 差。睡覺約 1 W 但分母只算醒著，
-// 混在一起平均瓦數會高估 20%，續航就少估。睡覺耗的另外算成 sleptWh。
+// Energy used while awake: sum Wh deltas only over adjacent pairs with no sleep
+// in between. Suspend draws about 1 W, and since the denominator is awake time
+// only, mixing it in overstates average power by ~20% and understates time left.
+// Energy used while asleep is reported separately as sleptWh.
 function awakeWh(seg, hz) {
   var total = 0
   for (var i = 1; i < seg.length; i++) {
@@ -140,7 +152,7 @@ function summarizeSeg(seg, hz, live, now) {
   }
 }
 
-// 主入口。state: "empty" 沒資料 / "calibrating" 還推不出 HZ / "ok"
+// Main entry. state: "empty" no data / "calibrating" HZ not determined yet / "ok"
 function summarize(rows, now) {
   var hz = detectHz(rows)
   var segs = sessions(rows)
@@ -153,11 +165,12 @@ function summarize(rows, now) {
   for (var i = 0; i < segs.length; i++)
     all.push(summarizeSeg(segs[i], hz, live && i === segs.length - 1, now))
   out.current = all[all.length - 1]
-  // 歷史列表：不含本次，最多 8 條。短的也列（使用者要看到每次拔電）
+  // History: excludes the current session, at most 8. Short ones are listed too
   out.history = all.slice(0, -1)
   out.history = out.history.slice(Math.max(0, out.history.length - 8)).reverse()
 
-  // 歷史平均功率：所有放電段（含本次）醒著耗電 / 總醒著秒數，長的 session 權重自然大
+  // All-time average power: awake Wh over all sessions (current included) / total awake seconds.
+  // Long sessions naturally weigh more
   var wh = 0, secs = 0
   for (var k = 0; k < all.length; k++) {
     if (all[k].awakeWh === null || all[k].awakeSecs < MIN_HIST_AWAKE) continue
@@ -165,12 +178,12 @@ function summarize(rows, now) {
   }
   out.histAvgW = secs > 0 ? wh * 3600 / secs : null
 
-  // 還能用多久 = 剩餘 Wh / 功率。只在放電中、且知道剩多少電時有意義
+  // Time left = remaining Wh / power. Only meaningful while discharging with a known energy level
   var lastWh = rows[rows.length - 1].wh
   if (live && lastWh !== null) {
     var c = out.current
     c.remainWh = lastWh
-    c.nowW = rows[rows.length - 1].pw !== null ? Math.abs(rows[rows.length - 1].pw) : null   // 最後一筆的瞬時功率
+    c.nowW = rows[rows.length - 1].pw !== null ? Math.abs(rows[rows.length - 1].pw) : null   // Instantaneous power from the last sample
     c.remainCurSecs = c.avgW ? lastWh * 3600 / c.avgW : null
     c.remainHistSecs = out.histAvgW ? lastWh * 3600 / out.histAvgW : null
   }

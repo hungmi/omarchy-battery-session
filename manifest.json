@@ -44,7 +44,8 @@
         "options": [
           "auto",
           "en",
-          "zh"
+          "zh-Hant",
+          "zh-Hans"
         ],
         "defaultValue": "auto"
       }
