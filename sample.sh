@@ -1,34 +1,88 @@
 #!/usr/bin/bash
-# One sample: print one TSV line to stdout and append it to this month's file.
-# Called by Service.qml every 60 seconds as
-#   /usr/bin/bash --noprofile --norc sample.sh
+# Sampler and history reader for the Battery Session plugin. Called by
+# Service.qml as
+#   /usr/bin/bash --noprofile --norc sample.sh          one sample
+#   /usr/bin/bash --noprofile --norc sample.sh load     bounded history dump
 # with a cleared environment (PATH=/usr/bin, LC_ALL=C and TZ only).
 #
+# Sample line, printed to stdout and appended to this month's file:
 #   wall  jiffies  boot  pct  state  ac  energy_wh  power_w
-#
 # jiffies is the global tick count from the second line of /proc/schedstat. It
 # only advances while the machine is awake and freezes during suspend. Stored
 # raw; the reader derives HZ from adjacent samples.
 #
-# Trust boundary: everything is bash builtins reading /sys and /proc. The only
-# external programs are /usr/bin/mkdir (first run) and /usr/bin/rm (monthly
-# retention), both by absolute path. The data directory is derived from the
-# password database (~ with HOME unset), never from environment strings, and
-# every directory and file is verified to be owned by us, not a symlink, and a
-# regular file before it is created, appended to, or deleted.
+# Trust boundary. Everything is bash builtins reading /sys and /proc. External
+# programs, all by absolute path: /usr/bin/dd for every file read and write,
+# /usr/bin/mkdir for missing directories, /usr/bin/rm for monthly retention.
+# The data directory is ~/.local/share/battery-session with ~ taken from the
+# password database (HOME is unset), never from environment strings. File
+# opens are bound to the checks: dd opens with O_NOFOLLOW (a symlink at the
+# path fails), O_NONBLOCK (a fifo or device cannot block), O_EXCL when creating
+# (an object that appeared in between fails), and reads are capped by bytes.
+# Directories are created with mkdir, which never follows a symlink at the
+# target. Ownership and type checks happen on the path before the open; a
+# same-user race there can only substitute another object of the same user,
+# and the open flags above still refuse symlinks and blocking specials.
 #
-# Exit codes read by Service.qml: 3 no battery, 4 clock not synced yet,
-# 5 data directory or file failed verification.
+# Exit codes read by Service.qml: 2 bad argument, 3 no battery, 4 clock not
+# synced yet, 5 data directory or file failed verification.
 set -u
 umask 077
 export PATH=/usr/bin LC_ALL=C
 unset -v HOME CDPATH IFS
 shopt -s nullglob
 
-ps=/sys/class/power_supply
-keep_months=12
+DD=/usr/bin/dd
+MKDIR=/usr/bin/mkdir
+RM=/usr/bin/rm
 
+keep_months=12
+load_months=3
+max_file_bytes=4194304      # 4 MiB per month file; a month at one row per minute is ~2.5 MB
+
+mode=${1-sample}
+[[ $mode == sample || $mode == load ]] || exit 2
+
+# ---- data directory: ~/.local/share/battery-session, verified at every level ----
+# HOME is unset above, so ~ comes from the password database.
+home=~
+[[ $home == /* && -d $home && ! -L $home && -O $home ]] || exit 5
+owned_dir() { [[ -d $1 && ! -L $1 && -O $1 ]]; }
+# Create if missing (mkdir refuses a symlink at the target), then verify.
+# Shared XDG parents get the default mode; our own directory is 0700.
+ensure_dir() {  # ensure_dir <path> [mode]
+  if [[ ! -e $1 && ! -L $1 ]]; then $MKDIR ${2:+-m "$2"} -- "$1" || return 1; fi
+  owned_dir "$1"
+}
+ensure_dir "$home/.local" || exit 5
+ensure_dir "$home/.local/share" || exit 5
+dir=$home/.local/share/battery-session
+ensure_dir "$dir" 700 || exit 5
+
+# Owned regular file, not a symlink. Path-based; the dd flags re-check symlink
+# and blocking at open time.
+owned_file() { [[ -f $1 && ! -L $1 && -O $1 ]]; }
+
+printf -v year '%(%Y)T' -1
+printf -v mon  '%(%m)T' -1
+
+# ================= load: dump the last N month files, bounded =================
+if [[ $mode == load ]]; then
+  for (( i = load_months - 1; i >= 0; i-- )); do
+    y=$year; m=$(( 10#$mon - i ))
+    while (( m <= 0 )); do m=$(( m + 12 )); y=$(( y - 1 )); done
+    printf -v f '%s/%04d-%02d.tsv' "$dir" "$y" "$m"
+    [[ -e $f || -L $f ]] || continue
+    owned_file "$f" || continue
+    $DD if="$f" iflag=nofollow,nonblock,count_bytes count=$max_file_bytes status=none
+    printf '\n'
+  done
+  exit 0
+fi
+
+# ================= sample =================
 # ---- locate the system battery (skip mouse/keyboard batteries) ----
+ps=/sys/class/power_supply
 bat=""
 for d in "$ps"/*; do
   [[ -r $d/type ]] && read -r t < "$d/type" || continue
@@ -88,36 +142,23 @@ elif [[ -n $i && -n $v ]];   then pw=$(fix2 $(( i * v )) 12); fi
 
 printf -v line '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$wall" "$jiffies" "$boot" "$pct" "$state" "$ac" "$wh" "$pw"
 
-# ---- data directory: ~/.local/share/battery-session, verified at every level ----
-# HOME is unset above, so ~ comes from the password database.
-home=~
-[[ $home == /* && -d $home && ! -L $home && -O $home ]] || exit 5
-# Each level is created if missing (never through a symlink), then verified.
-# Shared XDG parents get the default mode; our own directory is 0700.
-owned_dir() { [[ -d $1 && ! -L $1 && -O $1 ]]; }
-ensure_dir() {  # ensure_dir <path> [mode]
-  if [[ ! -e $1 && ! -L $1 ]]; then /usr/bin/mkdir ${2:+-m "$2"} -- "$1" || return 1; fi
-  owned_dir "$1"
-}
-ensure_dir "$home/.local" || exit 5
-ensure_dir "$home/.local/share" || exit 5
-dir=$home/.local/share/battery-session
-ensure_dir "$dir" 700 || exit 5
-
-printf -v month '%(%Y-%m)T' -1
-f=$dir/$month.tsv
-if [[ -e $f ]]; then
-  [[ -f $f && ! -L $f && -O $f ]] || exit 5
-else
-  printf 'wall\tjiffies\tboot\tpct\tstate\tac\tenergy_wh\tpower_w\n' > "$f" || exit 5
+# ---- append to this month's file ----
+f=$dir/$year-$mon.tsv
+if [[ ! -e $f && ! -L $f ]]; then
+  # O_CREAT|O_EXCL|O_NOFOLLOW: fails if anything appeared at the path meanwhile.
+  printf 'wall\tjiffies\tboot\tpct\tstate\tac\tenergy_wh\tpower_w\n' \
+    | $DD of="$f" conv=excl,notrunc oflag=nofollow status=none || exit 5
 fi
-printf '%s\n' "$line" >> "$f" || exit 5
+owned_file "$f" || exit 5
+# O_APPEND|O_NOFOLLOW|O_NONBLOCK: a symlink fails, a fifo/device cannot block.
+printf '%s\n' "$line" | $DD of="$f" oflag=append,nofollow,nonblock conv=notrunc status=none || exit 5
 
 # ---- keep only the last N month files (glob is sorted, LC_ALL=C) ----
+# rm unlinks the name and never follows a symlink.
 files=("$dir"/[0-9][0-9][0-9][0-9]-[0-9][0-9].tsv)
 if (( ${#files[@]} > keep_months )); then
   for old in "${files[@]:0:${#files[@]}-keep_months}"; do
-    [[ -f $old && ! -L $old && -O $old ]] && /usr/bin/rm -f -- "$old"
+    owned_file "$old" && $RM -f -- "$old"
   done
 fi
 

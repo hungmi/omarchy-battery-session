@@ -63,26 +63,33 @@ the jump in stored energy.
 The plugin runs as your user inside the Omarchy shell, like every shell plugin.
 What it does with that:
 
-- **One child process.** Every 60 seconds the service starts `/usr/bin/bash`
-  by absolute path with `--noprofile --norc`, a cleared environment
-  (`PATH=/usr/bin`, `LC_ALL=C`, and the system `TZ` so month file names agree), stdin and stderr closed, and a hard deadline
-  (SIGTERM after 20 s, SIGKILL 5 s later). It is stopped when the service is
-  destroyed.
+- **One child process at a time.** At startup and then every 60 seconds the
+  service starts `/usr/bin/bash` by absolute path with `--noprofile --norc`, a
+  cleared environment (`PATH=/usr/bin`, `LC_ALL=C`, and the system `TZ` so
+  month file names agree), stdin and stderr closed, and a hard deadline
+  (SIGTERM after 20 s for a sample or 30 s for the startup load, SIGKILL 5 s
+  later). Both are stopped when the service is destroyed.
 - **The script is bash builtins.** `sample.sh` reads `/sys/class/power_supply`
   and `/proc/schedstat` with `read`; there is no awk, cut, ls, sort or xargs.
-  The only external programs are `/usr/bin/mkdir` (first run) and
-  `/usr/bin/rm` (monthly retention), both by absolute path.
+  The only external programs are `/usr/bin/dd` (every file read and write),
+  `/usr/bin/mkdir` (missing directories) and `/usr/bin/rm` (monthly
+  retention), all by absolute path.
+- **File opens are bound to the checks.** Every data file is opened by `dd`
+  with `O_NOFOLLOW` (a symlink at the path fails), `O_NONBLOCK` (a fifo or
+  device cannot block), and `O_EXCL` when a month file is created (anything
+  that appeared at the path in between fails). Reads are capped at 4 MiB per
+  month file on the producer side, so the shell never buffers more than three
+  such files. `mkdir` refuses a symlink at the target and `rm` never follows
+  one. Ownership and type are additionally checked on the path before each
+  open.
 - **The data directory is not taken from the environment.** It is always
   `~/.local/share/battery-session`, with `~` resolved from the password
-  database. Before anything is created, appended to or deleted, the script
-  creates any missing directory level (never through a symlink) and checks that
-  `~`, `~/.local`, `~/.local/share`, the data directory and the month file are
-  owned by the current user, are not symlinks, and are a directory or regular
-  file as appropriate. Any failure aborts the sample
-  (exit 5, shown in the popup). The directory is created with mode 0700.
-- **Bounded reads.** History is loaded with Quickshell's `FileView`, not a
-  shell pipeline. Files over 16 MB are skipped, at most 150 000 rows are kept
-  in memory, and a sampler line over 256 characters is discarded.
+  database. Missing directory levels are created; `~`, `~/.local`,
+  `~/.local/share` and the data directory must be owned by the current user
+  and not be symlinks. The data directory is created with mode 0700. Any
+  failure aborts the sample (exit 5, shown in the popup).
+- **Bounded parsing.** At most 150 000 rows are kept in memory and a sampler
+  line over 256 characters is discarded.
 - **No network, no sudo, no systemd units, no writes outside the data
   directory, no configuration changes** other than the `barLabel` value the
   widget writes to `shell.json` when you right-click it.
